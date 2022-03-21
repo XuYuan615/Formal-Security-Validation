@@ -1,0 +1,106 @@
+type point.
+free Sec:channel [private].		(*secure channel*)
+free Pub:channel.				(*public channel*)
+(*Names & Variables*)
+const P:point.
+free IDu:bitstring.
+free IDms:bitstring.
+free Xu:point.
+free Xms:point.
+free Ru:point.
+free Rms:point.
+free Ppub:point.
+free xu:bitstring [private].
+free xms:bitstring [private].
+free s:bitstring [private].
+free SK:bitstring [private].
+free SK':bitstring [private].
+(*Constructors, Destructors & Equations*)
+fun H1(bitstring,point,point):bitstring.
+fun H2(point):bitstring.
+fun H3(bitstring,point,point,bitstring):bitstring.
+fun H4(bitstring,bitstring,point,point,bitstring):bitstring.
+fun H5(point,bitstring,bitstring,point):bitstring.
+fun XOR(bitstring,bitstring):bitstring.
+fun ADD(bitstring,bitstring):bitstring.
+fun PA(point,point):point.	 (*point addition*)
+fun MULT(bitstring,bitstring):bitstring.(*multiplication*)	
+fun ECPM(bitstring,point):point.
+(*elliptic curve point multiplication*)
+fun CONCAT(bitstring, bitstring):bitstring.
+equation forall a:bitstring, b:bitstring; XOR(XOR(a,b),b)=a.
+(*Event*)
+event beginUserU(bitstring).
+event endUserU(bitstring).
+event beginServerS(bitstring).
+event endServerS(bitstring).
+(*Queries*)
+query attacker(SK).
+query attacker(SK').
+query id:bitstring; inj-event (endUserU(id)) ==> inj-event(beginUserU(id)).
+query id:bitstring; inj-event (endServerS(id)) ==> inj-event(beginServerS(id)).
+(*Processes*)
+(*RC Processes*)
+let UserReg=
+	in(Sec,(IDu:bitstring,Xu:point));
+	new ru:bitstring;
+	let Ru = ECPM(ru,P) in
+	let Hu = H1(IDu,Xu,Ru) in
+	let yu = ADD(ru,MULT(s,Hu)) in
+	out(Sec,(yu,Ru));
+	0.
+let ServerReg=
+	in(Sec,(IDms:bitstring,Xms:point));
+	new rms:bitstring;
+	let Rms = ECPM(rms,P) in
+	let Hms = H1(IDms,Xms,Rms) in
+	let yms = ADD(rms,MULT(s,Hms)) in
+	out(Sec,(yms,Rms));
+	0.
+let RC=UserReg | ServerReg.
+(*User Processes*)
+let UserU=
+	(*Registration*)
+	out(Sec,(IDu,Xu));
+	in(Sec,(yu:bitstring,Ru:point));
+	(*Login & Authentication*)
+	event beginUserU(IDu);
+	new a:bitstring;
+	new b:bitstring;
+	let A = ECPM(a,P) in
+	let B = ECPM(b,P) in
+	let M = ECPM(b,PA(Xms,PA(Rms,ECPM(H1(IDms,Xms,Rms),Ppub)))) in
+	let N = XOR(H2(M),(IDu,A,Ru,Xu)) in
+	new Tu:bitstring;
+	let sigma = ADD(MULT(a,H3(IDu,A,Ru,Tu)),(yu,xu)) in
+	out(Pub,(B,N,sigma,Tu));
+	in(Pub,(eta:bitstring,D:point,Tms:bitstring));
+	if(eta = H4(IDu,IDms,A,D,Tms)) then
+	let lambda = ECPM(ADD(yu,MULT(a,eta)),D) in
+	let SK = H5(lambda,IDu,IDms,ECPM(xu,Xms)) in
+	event endUserU(IDu)
+	else 0.
+(*Server Processes*)
+let ServerS=
+	out(Sec,(IDms,Xms));
+	in(Sec,(yms:bitstring,Rms:point));
+	(*login & Authentication*)
+	event beginServerS(IDms);
+	in(Pub,(B:point,N:bitstring,sigma:bitstring,Tu:bitstring));
+	let M' = ECPM(ADD(xms,yms),B) in
+	let (IDu':bitstring,A':point,Ru':point,Xu':point) = XOR(H2(M'),N) in
+	let W = PA(Xu',PA(Ru',ECPM(H1(IDu',Xu',Ru'),Ppub))) in
+	if ECPM(sigma,P) = PA(ECPM(H3(IDu',A',Ru',Tu),A'),W) then
+	new d:bitstring;
+	let D = ECPM(d,P) in
+	new Tms:bitstring;
+	let eta = H4(IDu',IDms,A',D,Tms) in
+	let lambda' = ECPM(d,PA(W,ECPM(eta,A'))) in
+	let SK' = H5(lambda',IDu',IDms,ECPM(xms,Xu)) in
+	out(Pub,(eta,D,Tms));
+	event endServerS(IDms)
+	else 0.
+
+(*Processes Replication*)
+process 
+(!UserU | !ServerS | !RC)
